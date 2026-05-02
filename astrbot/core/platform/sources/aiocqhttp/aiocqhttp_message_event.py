@@ -32,10 +32,31 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
         self.bot = bot
 
     @staticmethod
-    async def _from_segment_to_dict(segment: BaseMessageComponent) -> dict:
+    async def _from_segment_to_dict(
+        segment: BaseMessageComponent,
+        use_remote_image_url: bool = False,
+    ) -> dict:
         """修复部分字段"""
-        if isinstance(segment, Image | Record):
-            # For Image and Record segments, we convert them to base64
+        if isinstance(segment, Image):
+            image_url = segment.url or segment.file or ""
+            if use_remote_image_url and image_url.startswith(("http://", "https://")):
+                return {
+                    "type": "image",
+                    "data": {
+                        "file": image_url,
+                    },
+                }
+
+            # 图片默认仍转换为 base64，只有显式开启直传策略时才发送 URL。
+            bs64 = await segment.convert_to_base64()
+            return {
+                "type": segment.type.lower(),
+                "data": {
+                    "file": f"base64://{bs64}",
+                },
+            }
+        if isinstance(segment, Record):
+            # 语音始终转换为 base64，不受远程图片直传策略影响。
             bs64 = await segment.convert_to_base64()
             return {
                 "type": segment.type.lower(),
@@ -44,7 +65,7 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
                 },
             }
         if isinstance(segment, File):
-            # For File segments, we need to handle the file differently
+            # 文件段需要额外处理本地绝对路径。
             d = await segment.to_dict()
             file_val = d.get("data", {}).get("file", "")
             if file_val:
@@ -63,26 +84,36 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
         if isinstance(segment, Video):
             d = await segment.to_dict()
             return d
-        # For other segments, we simply convert them to a dict by calling toDict
+        # 其他消息段直接复用组件自身的 OneBot 字典转换。
         return segment.toDict()
 
     @staticmethod
     async def _parse_onebot_json(message_chain: MessageChain):
         """解析成 OneBot json 格式"""
         ret = []
+        use_remote_image_url = message_chain.use_remote_image_url_ is True
         for segment in message_chain.chain:
             if isinstance(segment, At):
                 # At 组件后插入一个空格，避免与后续文本粘连
-                d = await AiocqhttpMessageEvent._from_segment_to_dict(segment)
+                d = await AiocqhttpMessageEvent._from_segment_to_dict(
+                    segment,
+                    use_remote_image_url,
+                )
                 ret.append(d)
                 ret.append({"type": "text", "data": {"text": " "}})
             elif isinstance(segment, Plain):
                 if not segment.text.strip():
                     continue
-                d = await AiocqhttpMessageEvent._from_segment_to_dict(segment)
+                d = await AiocqhttpMessageEvent._from_segment_to_dict(
+                    segment,
+                    use_remote_image_url,
+                )
                 ret.append(d)
             else:
-                d = await AiocqhttpMessageEvent._from_segment_to_dict(segment)
+                d = await AiocqhttpMessageEvent._from_segment_to_dict(
+                    segment,
+                    use_remote_image_url,
+                )
                 ret.append(d)
         return ret
 
@@ -159,7 +190,7 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
                 d = await cls._from_segment_to_dict(seg)
                 await cls._dispatch_send(bot, event, is_group, session_id, [d])
             else:
-                messages = await cls._parse_onebot_json(MessageChain([seg]))
+                messages = await cls._parse_onebot_json(message_chain.derive([seg]))
                 if not messages:
                     continue
                 await cls._dispatch_send(bot, event, is_group, session_id, messages)
@@ -210,7 +241,7 @@ class AiocqhttpMessageEvent(AstrMessageEvent):
                         if any(p in buffer for p in "。？！~…"):
                             buffer = await self.process_buffer(buffer, pattern)
                     else:
-                        await self.send(MessageChain(chain=[comp]))
+                        await self.send(chain.derive([comp]))
                         await asyncio.sleep(1.5)  # 限速
 
         if buffer.strip():

@@ -22,6 +22,7 @@ class MessageChain:
     Attributes:
         `chain` (list): 用于顺序存储各个组件。
         `use_t2i_` (bool): 用于标记是否使用文本转图片服务。默认为 None，即跟随用户的设置。当设置为 True 时，将会使用文本转图片服务。
+        `use_remote_image_url_` (bool): 用于标记是否允许平台适配器直接发送远程图片 URL。默认为 None，即跟随平台默认行为。
 
     """
 
@@ -32,6 +33,8 @@ class MessageChain:
     )
     type: str | None = None
     """消息链承载的消息的类型。可选，用于让消息平台区分不同业务场景的消息链。"""
+    use_remote_image_url_: bool | None = None
+    """是否允许平台适配器直接发送远程图片 URL。None 跟随平台默认行为。"""
 
     def derive(self, chain: list[BaseMessageComponent] | None = None) -> "MessageChain":
         """基于当前消息链创建一个新的 MessageChain，继承元数据（use_t2i_、use_markdown_ 等）。
@@ -43,6 +46,7 @@ class MessageChain:
         new = MessageChain(chain=chain if chain is not None else [])
         new.use_t2i_ = self.use_t2i_
         new.use_markdown_ = self.use_markdown_
+        new.use_remote_image_url_ = self.use_remote_image_url_
         new.type = self.type
         return new
 
@@ -146,6 +150,14 @@ class MessageChain:
         self.use_markdown_ = use
         return self
 
+    def use_remote_image_url(self, use: bool | None = True):
+        """设置是否允许平台适配器直接发送远程图片 URL。
+
+        仅对支持该策略的平台适配器生效。不支持的平台会忽略此字段。
+        """
+        self.use_remote_image_url_ = use
+        return self
+
     def get_plain_text(self, with_other_comps_mark: bool = False) -> str:
         """获取纯文本消息。这个方法将获取 chain 中所有 Plain 组件的文本并拼接成一条消息。空格分隔。
 
@@ -228,6 +240,7 @@ class MessageEventResult(MessageChain):
     Attributes:
         `chain` (list): 用于顺序存储各个组件。
         `use_t2i_` (bool): 用于标记是否使用文本转图片服务。默认为 None，即跟随用户的设置。当设置为 True 时，将会使用文本转图片服务。
+        `use_remote_image_url_` (bool): 用于标记是否允许平台适配器直接发送远程图片 URL。默认为 None，即跟随平台默认行为。
         `result_type` (EventResultType): 事件处理的结果类型。
 
     """
